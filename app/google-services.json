@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "894040150197",
+    "project_id": "triviamaps-d31ff",
+    "storage_bucket": "triviamaps-d31ff.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:894040150197:android:18bdbbb7a9df93e49d2efc",
+        "android_client_info": {
+          "package_name": "com.triviamaps.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDn_VAttbUJUfPXkvaHlr2DqqA7gM8p-Z4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
