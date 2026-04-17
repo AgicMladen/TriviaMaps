@@ -55,7 +55,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalContentColor
-import kotlinx.coroutines.awaitCancellation
 
 const val PLACEMENT_RADIUS_METERS = 25.0
 const val FILTER_MY_MARKERS = "My Markers"
@@ -73,6 +72,11 @@ fun MapScreen(
     onWelcomeDismissed: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("triviamaps_prefs", android.content.Context.MODE_PRIVATE)
+    }
+    val notchMode = remember { prefs.getBoolean("notch_mode", false) }
+    val topBarPadding = if (notchMode) 48.dp else 12.dp
     val scope = rememberCoroutineScope()
     val markerRepository = remember { MarkerRepository() }
     val authRepository = remember { AuthRepository() }
@@ -88,7 +92,7 @@ fun MapScreen(
     var placementOutOfRange by remember { mutableStateOf(false) }
     var locationUnavailable by remember { mutableStateOf(false) }
     var showFilterBar by remember { mutableStateOf(false) }
-    var selectedFilter by remember { mutableStateOf("All") }
+    var selectedFilters by remember { mutableStateOf(setOf<String>()) }
 
     val locationPermissions = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -117,13 +121,20 @@ fun MapScreen(
 
     val filterCategories = listOf("All") + Constants.CATEGORIES + listOf(FILTER_MY_MARKERS)
 
-    val filteredMarkers = when (selectedFilter) {
-        "All" -> markers
-        FILTER_MY_MARKERS -> markers.filter { it.authorUid == currentUser?.uid }
-        else -> markers.filter { it.category == selectedFilter }
+    // Multi-select filter logic
+    val filteredMarkers = when {
+        selectedFilters.isEmpty() -> markers
+        selectedFilters.contains(FILTER_MY_MARKERS) && selectedFilters.size == 1 ->
+            markers.filter { it.authorUid == currentUser?.uid }
+        selectedFilters.contains(FILTER_MY_MARKERS) ->
+            markers.filter {
+                it.authorUid == currentUser?.uid ||
+                        selectedFilters.contains(it.category)
+            }
+        else -> markers.filter { selectedFilters.contains(it.category) }
     }
 
-    val isFilterActive = selectedFilter != "All"
+    val isFilterActive = selectedFilters.isNotEmpty()
 
     if (isPlacingMarker) {
         userLocation?.let { userLoc ->
@@ -142,7 +153,14 @@ fun MapScreen(
 
     LaunchedEffect(Unit) {
         authRepository.getCurrentUserData().onSuccess { currentUser = it }
-        markerRepository.getAllMarkers().onSuccess { markers = it }
+        val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        firestore.collection(com.triviamaps.app.data.Constants.MARKERS_COLLECTION)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                markers = snapshot.documents.mapNotNull {
+                    it.toObject(com.triviamaps.app.data.model.TriviaMarker::class.java)
+                }
+            }
     }
 
     LaunchedEffect(Unit) {
@@ -166,32 +184,29 @@ fun MapScreen(
         if (!fineGranted && !coarseGranted) return@LaunchedEffect
         locationUnavailable = false
         val fusedClient = LocationServices.getFusedLocationProviderClient(context)
+        while (true) {
+            try {
+                var location: Location? = fusedClient.getCurrentLocation(
+                    if (fineGranted) Priority.PRIORITY_HIGH_ACCURACY
+                    else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    null
+                ).await()
 
-        // Build a location request that uses both GPS and Network
-        val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
-            if (fineGranted) Priority.PRIORITY_HIGH_ACCURACY
-            else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-            10_000L // update every 10 seconds
-        ).apply {
-            setMinUpdateIntervalMillis(5_000L)
-            setWaitForAccurateLocation(false) // don't wait for GPS, accept network too
-        }.build()
+                if (location == null) {
+                    location = fusedClient.lastLocation.await()
+                }
 
-        val locationCallback = object : com.google.android.gms.location.LocationCallback() {
-            override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
-                val location = result.lastLocation ?: return
-                locationUnavailable = false
-                val latLng = LatLng(location.latitude, location.longitude)
-                userLocation = latLng
-                onUserLocationUpdated(latLng)
-                if (!hasInitializedCamera) {
-                    scope.launch {
+                if (location != null) {
+                    locationUnavailable = false
+                    val latLng = LatLng(location.latitude, location.longitude)
+                    userLocation = latLng
+                    onUserLocationUpdated(latLng)
+                    if (!hasInitializedCamera) {
                         cameraPositionState.position =
                             CameraPosition.fromLatLngZoom(latLng, 18f)
                         hasInitializedCamera = true
                     }
-                }
-                scope.launch {
+
                     markers.forEach { marker ->
                         val markerLocation = Location("").apply {
                             latitude = marker.latitude
@@ -209,53 +224,27 @@ fun MapScreen(
                                 .getBoolean("notifications_enabled", true)
 
                             if (notificationsEnabled) {
-                                val alreadyAnswered = currentUser?.let { user ->
-                                    markerRepository.hasUserAnsweredMarker(marker.id, user.uid)
-                                } ?: false
-                                val isOwn = marker.authorUid == currentUser?.uid
-                                if (!alreadyAnswered && !isOwn) {
-                                    sendProximityNotification(context, marker)
+                                scope.launch {
+                                    val alreadyAnswered = currentUser?.let { user ->
+                                        markerRepository.hasUserAnsweredMarker(marker.id, user.uid)
+                                    } ?: false
+                                    val isOwn = marker.authorUid == currentUser?.uid
+                                    if (!alreadyAnswered && !isOwn) {
+                                        sendProximityNotification(context, marker)
+                                    }
                                 }
                             }
                             notifiedMarkerIds = notifiedMarkerIds + marker.id
                         }
                     }
-                }
-            }
-
-            override fun onLocationAvailability(
-                availability: com.google.android.gms.location.LocationAvailability
-            ) {
-                if (!availability.isLocationAvailable) {
+                } else {
                     locationUnavailable = true
                 }
+            } catch (e: Exception) {
+                locationUnavailable = true
             }
+            delay(10_000)
         }
-
-        try {
-            fusedClient.requestLocationUpdates(
-                locationRequest,
-                locationCallback,
-                android.os.Looper.getMainLooper()
-            )
-        } catch (e: Exception) {
-            locationUnavailable = true
-        }
-
-        // Also try to get last known location immediately so map centers fast
-        try {
-            val last = fusedClient.lastLocation.await()
-            if (last != null && !hasInitializedCamera) {
-                val latLng = LatLng(last.latitude, last.longitude)
-                userLocation = latLng
-                onUserLocationUpdated(latLng)
-                cameraPositionState.position = CameraPosition.fromLatLngZoom(latLng, 18f)
-                hasInitializedCamera = true
-            }
-        } catch (e: Exception) { /* ignore */ }
-
-        // Keep coroutine alive so callback stays registered
-        awaitCancellation()
     }
 
     if (!permissionsGranted && !locationPermissions.shouldShowRationale) {
@@ -277,13 +266,10 @@ fun MapScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
 
-        // MAP
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
-            properties = MapProperties(
-                isMyLocationEnabled = permissionsGranted
-            ),
+            properties = MapProperties(isMyLocationEnabled = permissionsGranted),
             uiSettings = MapUiSettings(
                 myLocationButtonEnabled = !isPlacingMarker,
                 zoomControlsEnabled = false
@@ -316,19 +302,16 @@ fun MapScreen(
                         radius = PLACEMENT_RADIUS_METERS,
                         strokeColor = if (placementOutOfRange)
                             Color.Red.copy(alpha = 0.9f)
-                        else
-                            Color(0xFF6C63FF).copy(alpha = 0.9f),
+                        else Color(0xFF6C63FF).copy(alpha = 0.9f),
                         strokeWidth = 4f,
                         fillColor = if (placementOutOfRange)
                             Color.Red.copy(alpha = 0.08f)
-                        else
-                            Color(0xFF6C63FF).copy(alpha = 0.08f)
+                        else Color(0xFF6C63FF).copy(alpha = 0.08f)
                     )
                 }
             }
         }
 
-        // CROSSHAIR
         if (isPlacingMarker) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -342,7 +325,6 @@ fun MapScreen(
             }
         }
 
-        // TOP BAR + FILTER BAR
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -351,7 +333,8 @@ fun MapScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp)
+                    .padding(top = topBarPadding, bottom = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -378,8 +361,7 @@ fun MapScreen(
                                     contentDescription = "Filter",
                                     tint = if (isFilterActive)
                                         MaterialTheme.colorScheme.primary
-                                    else
-                                        MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurface
                                 )
                                 if (isFilterActive) {
                                     Badge(
@@ -414,7 +396,6 @@ fun MapScreen(
                 }
             }
 
-            // Animated filter bar
             AnimatedVisibility(
                 visible = showFilterBar && !isPlacingMarker,
                 enter = expandVertically() + fadeIn(),
@@ -445,7 +426,7 @@ fun MapScreen(
                             )
                             if (isFilterActive) {
                                 TextButton(
-                                    onClick = { selectedFilter = "All" },
+                                    onClick = { selectedFilters = emptySet() },
                                     contentPadding = PaddingValues(
                                         horizontal = 8.dp,
                                         vertical = 0.dp
@@ -465,7 +446,11 @@ fun MapScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             filterCategories.forEach { category ->
-                                val isSelected = selectedFilter == category
+                                val isSelected = if (category == "All")
+                                    selectedFilters.isEmpty()
+                                else
+                                    selectedFilters.contains(category)
+
                                 val categoryColor = when (category) {
                                     "All" -> MaterialTheme.colorScheme.primary
                                     FILTER_MY_MARKERS -> Color(0xFF6C63FF)
@@ -481,14 +466,20 @@ fun MapScreen(
 
                                 Surface(
                                     modifier = Modifier.clickable {
-                                        selectedFilter = category
-                                        showFilterBar = false
+                                        selectedFilters = when (category) {
+                                            "All" -> emptySet()
+                                            else -> {
+                                                if (selectedFilters.contains(category))
+                                                    selectedFilters - category
+                                                else
+                                                    selectedFilters + category
+                                            }
+                                        }
                                     },
                                     shape = RoundedCornerShape(20.dp),
                                     color = if (isSelected)
                                         categoryColor.copy(alpha = 0.15f)
-                                    else
-                                        MaterialTheme.colorScheme.background,
+                                    else MaterialTheme.colorScheme.background,
                                     border = androidx.compose.foundation.BorderStroke(
                                         width = if (isSelected) 2.dp else 1.dp,
                                         color = if (isSelected) categoryColor
@@ -535,7 +526,6 @@ fun MapScreen(
             }
         }
 
-        // LOCATION UNAVAILABLE BANNER
         if (locationUnavailable && permissionsGranted) {
             LocationUnavailableBanner(
                 message = "Cannot get your location. Please enable GPS or Wi-Fi location.",
@@ -549,7 +539,6 @@ fun MapScreen(
             )
         }
 
-        // PLACEMENT INSTRUCTIONS
         if (isPlacingMarker) {
             Surface(
                 modifier = Modifier
@@ -558,8 +547,7 @@ fun MapScreen(
                 shape = RoundedCornerShape(16.dp),
                 color = if (placementOutOfRange)
                     MaterialTheme.colorScheme.errorContainer
-                else
-                    MaterialTheme.colorScheme.primaryContainer,
+                else MaterialTheme.colorScheme.primaryContainer,
                 tonalElevation = 4.dp
             ) {
                 Text(
@@ -573,13 +561,11 @@ fun MapScreen(
                     textAlign = TextAlign.Center,
                     color = if (placementOutOfRange)
                         MaterialTheme.colorScheme.onErrorContainer
-                    else
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
         }
 
-        // BOTTOM CONTROLS — PLACEMENT MODE
         if (isPlacingMarker) {
             Row(
                 modifier = Modifier
@@ -610,30 +596,18 @@ fun MapScreen(
 
                 ExtendedFloatingActionButton(
                     onClick = {
-                        if (!placementOutOfRange) {
-                            showAddMarkerDialog = true
-                        }
+                        if (!placementOutOfRange) showAddMarkerDialog = true
                     },
                     containerColor = if (placementOutOfRange) Color.Gray
                     else MaterialTheme.colorScheme.primary,
                     icon = {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "Confirm",
-                            tint = Color.White
-                        )
+                        Icon(Icons.Default.Check, contentDescription = "Confirm", tint = Color.White)
                     },
                     text = {
-                        Text(
-                            "Confirm Location",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text("Confirm Location", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 )
             }
-
-            // BOTTOM CONTROLS — NORMAL MODE
         } else {
             currentUser?.let { user ->
                 Surface(
@@ -698,17 +672,12 @@ fun MapScreen(
                     },
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = "Add marker",
-                        tint = Color.White
-                    )
+                    Icon(Icons.Default.Add, contentDescription = "Add marker", tint = Color.White)
                 }
             }
         }
     }
 
-    // TRIVIA DIALOG
     selectedMarker?.let { marker ->
         TriviaDialog(
             marker = marker,
@@ -725,7 +694,6 @@ fun MapScreen(
         )
     }
 
-    // ADD MARKER DIALOG
     if (showAddMarkerDialog) {
         AddMarkerDialog(
             location = crosshairLocation,
@@ -759,7 +727,6 @@ fun MapScreen(
         )
     }
 
-    // PERMISSION RATIONALE DIALOG
     if (locationPermissions.shouldShowRationale) {
         AlertDialog(
             onDismissRequest = {},
@@ -771,21 +738,16 @@ fun MapScreen(
                     modifier = Modifier.size(32.dp)
                 )
             },
-            title = {
-                Text("Location Required", fontWeight = FontWeight.Bold)
-            },
+            title = { Text("Location Required", fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     "TriviaMaps needs your location to show nearby trivia markers, " +
-                            "let you place new markers, and detect when you're close " +
-                            "to points of interest.",
+                            "let you place new markers, and detect when you're close to points of interest.",
                     textAlign = TextAlign.Center
                 )
             },
             confirmButton = {
-                Button(onClick = {
-                    locationPermissions.launchMultiplePermissionRequest()
-                }) {
+                Button(onClick = { locationPermissions.launchMultiplePermissionRequest() }) {
                     Text("Grant Permission")
                 }
             },
@@ -793,19 +755,14 @@ fun MapScreen(
                 TextButton(onClick = {
                     context.startActivity(
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = android.net.Uri.fromParts(
-                                "package", context.packageName, null
-                            )
+                            data = android.net.Uri.fromParts("package", context.packageName, null)
                         }
                     )
-                }) {
-                    Text("Open Settings")
-                }
+                }) { Text("Open Settings") }
             }
         )
     }
 
-    // WELCOME DIALOG
     if (showWelcome != 0) {
         WelcomeDialog(
             isNewUser = showWelcome == 1,
@@ -886,13 +843,11 @@ fun sendProximityNotification(context: Context, marker: TriviaMarker) {
     val channelId = "proximity_channel"
     val notificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
     val channel = NotificationChannel(
         channelId, "Nearby Trivia",
         NotificationManager.IMPORTANCE_DEFAULT
     )
     notificationManager.createNotificationChannel(channel)
-
     val notification = NotificationCompat.Builder(context, channelId)
         .setSmallIcon(android.R.drawable.ic_dialog_info)
         .setContentTitle("📍 Trivia nearby!")
@@ -900,6 +855,5 @@ fun sendProximityNotification(context: Context, marker: TriviaMarker) {
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
         .setAutoCancel(true)
         .build()
-
     notificationManager.notify(marker.id.hashCode(), notification)
 }

@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +27,9 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     var notificationsEnabled by remember {
         mutableStateOf(prefs.getBoolean("notifications_enabled", true))
+    }
+    var notchMode by remember {
+        mutableStateOf(prefs.getBoolean("notch_mode", false))
     }
 
     Scaffold(
@@ -50,6 +54,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Notifications section
             Text(
                 "Notifications",
                 fontWeight = FontWeight.Bold,
@@ -72,6 +77,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -83,7 +89,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 MaterialTheme.colorScheme.primary
                             else Color.Gray
                         )
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 "Proximity Notifications",
                                 fontWeight = FontWeight.Medium,
@@ -96,11 +102,76 @@ fun SettingsScreen(onBack: () -> Unit) {
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.width(16.dp))
                     Switch(
                         checked = notificationsEnabled,
                         onCheckedChange = { enabled ->
                             notificationsEnabled = enabled
                             prefs.edit().putBoolean("notifications_enabled", enabled).apply()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Display section
+            Text(
+                "Display",
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.PhoneAndroid,
+                            contentDescription = null,
+                            tint = if (notchMode)
+                                MaterialTheme.colorScheme.primary
+                            else Color.Gray
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Notch / Camera Cutout Mode",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "Moves top buttons down to avoid camera cutout",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Switch(
+                        checked = notchMode,
+                        onCheckedChange = { enabled ->
+                            notchMode = enabled
+                            prefs.edit().putBoolean("notch_mode", enabled).apply()
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,

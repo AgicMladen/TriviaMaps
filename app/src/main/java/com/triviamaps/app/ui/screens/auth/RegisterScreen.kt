@@ -42,6 +42,8 @@ import com.triviamaps.app.data.repository.AuthRepository
 import com.triviamaps.app.data.repository.CloudinaryRepository
 import kotlinx.coroutines.launch
 import java.io.File
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.filled.PhoneAndroid
 
 val COUNTRIES = listOf(
     "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia",
@@ -53,7 +55,7 @@ val COUNTRIES = listOf(
     "Egypt", "El Salvador", "Estonia", "Ethiopia", "Finland", "France", "Gabon",
     "Georgia", "Germany", "Ghana", "Greece", "Guatemala", "Guinea", "Haiti", "Honduras",
     "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel",
-    "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kosovo", "Kuwait",
+    "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kuwait",
     "Kyrgyzstan", "Latvia", "Lebanon", "Libya", "Liechtenstein", "Lithuania",
     "Luxembourg", "Madagascar", "Malaysia", "Mali", "Malta", "Mexico", "Moldova",
     "Monaco", "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Nepal",
@@ -67,6 +69,7 @@ val COUNTRIES = listOf(
     "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Uzbekistan",
     "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
 )
+
 
 val DEFAULT_AVATARS = listOf(
     "🧑‍🚀", "🧙", "🦊", "🐺", "🦁", "🐯", "🐻", "🦅",
@@ -94,23 +97,25 @@ fun RegisterScreen(
     val cloudinaryRepository = remember { CloudinaryRepository() }
     val scope = rememberCoroutineScope()
 
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var fullName by remember { mutableStateOf("") }
-    var country by remember { mutableStateOf("") }
-    var profileImageUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedDefaultAvatar by remember { mutableStateOf<String?>(null) }
+    var email by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
+    var fullName by rememberSaveable { mutableStateOf("") }
+    var country by rememberSaveable { mutableStateOf("") }
+    var profileImageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var selectedDefaultAvatar by rememberSaveable { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf("") }
-    var showCountryPicker by remember { mutableStateOf(false) }
-    var showAvatarPicker by remember { mutableStateOf(false) }
-    var showPhotoSourceDialog by remember { mutableStateOf(false) }
-    var showPasswordErrors by remember { mutableStateOf(false) }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var errorMessage by rememberSaveable { mutableStateOf("") }
+    var showCountryPicker by rememberSaveable { mutableStateOf(false) }
+    var showAvatarPicker by rememberSaveable { mutableStateOf(false) }
+    var showPhotoSourceDialog by rememberSaveable { mutableStateOf(false) }
+    var showPasswordErrors by rememberSaveable { mutableStateOf(false) }
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
+    var confirmPasswordVisible by rememberSaveable { mutableStateOf(false) }
     var waitingForCameraPermission by remember { mutableStateOf(false) }
+
+    var showNotchDialog by remember { mutableStateOf(false) }
 
     val passwordErrors = remember(password) { validatePassword(password) }
     val passwordValid = passwordErrors.isEmpty()
@@ -449,7 +454,7 @@ fun RegisterScreen(
                             )
                             isLoading = false
                             result.fold(
-                                onSuccess = { onRegisterSuccess() },
+                                onSuccess = { showNotchDialog = true },
                                 onFailure = {
                                     errorMessage = it.message ?: "Registration failed"
                                 }
@@ -665,6 +670,37 @@ fun RegisterScreen(
             onDismiss = { showAvatarPicker = false }
         )
     }
+    // Notch awareness popup shown once after registration
+    if (showNotchDialog) {
+        AlertDialog(
+            onDismissRequest = { showNotchDialog = false },
+            icon = {
+                Icon(
+                    Icons.Default.PhoneAndroid,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = { Text("Does your phone have a notch?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "If your phone has a notch or a camera cutout in the screen, " +
+                            "you can enable Notch Mode in Settings to move the top buttons " +
+                            "down for better visibility. You can change this anytime in Settings.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showNotchDialog = false
+                    onRegisterSuccess()
+                }) {
+                    Text("Got it!")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -798,5 +834,7 @@ fun AvatarPickerDialog(
                 ) { Text("Cancel") }
             }
         }
+
     }
+
 }

@@ -37,6 +37,7 @@ import com.triviamaps.app.data.repository.CloudinaryRepository
 import com.triviamaps.app.data.repository.MarkerRepository
 import kotlinx.coroutines.launch
 import java.io.File
+import androidx.compose.runtime.saveable.rememberSaveable
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -51,14 +52,15 @@ fun AddMarkerDialog(
     val scope = rememberCoroutineScope()
     val cloudinaryRepository = remember { CloudinaryRepository() }
 
-    var locationName by remember { mutableStateOf("") }
-    var question by remember { mutableStateOf("") }
-    var options by remember { mutableStateOf(listOf("", "", "", "")) }
-    var correctAnswerIndex by remember { mutableStateOf(0) }
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedCategory by remember { mutableStateOf(Constants.CATEGORIES[0]) }
+    var locationName by rememberSaveable { mutableStateOf("") }
+    var question by rememberSaveable { mutableStateOf("") }
+    var options by rememberSaveable { mutableStateOf(listOf("", "", "", "")) }
+    var correctAnswerIndex by rememberSaveable { mutableStateOf(0) }
+    var imageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var selectedCategory by rememberSaveable { mutableStateOf(Constants.CATEGORIES[0]) }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf("") }
+    var errorMessage by rememberSaveable { mutableStateOf("") }
+    //var waitingForCameraPermission by remember { mutableStateOf(false) }
 
     val cameraPermissionState = rememberPermissionState(
         android.Manifest.permission.CAMERA
@@ -344,11 +346,26 @@ fun AddMarkerDialog(
                 }
 
                 if (errorMessage.isNotEmpty()) {
-                    Text(
-                        errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 13.sp
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("⚠️", fontSize = 16.sp)
+                            Text(
+                                errorMessage,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
 
                 Button(

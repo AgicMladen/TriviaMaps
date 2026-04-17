@@ -1,5 +1,6 @@
 package com.triviamaps.app.ui.screens.auth
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,17 +12,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.triviamaps.app.R
 import com.triviamaps.app.data.repository.AuthRepository
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.layout.ContentScale
-import com.triviamaps.app.R
 
 @Composable
 fun LoginScreen(
@@ -36,6 +37,10 @@ fun LoginScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    var showForgotDialog by remember { mutableStateOf(false) }
+    var forgotEmail by remember { mutableStateOf("") }
+    var forgotMessage by remember { mutableStateOf("") }
+    var forgotLoading by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -63,7 +68,7 @@ fun LoginScreen(
                 color = Color.Gray
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = email,
@@ -80,8 +85,7 @@ fun LoginScreen(
                 label = { Text("Password") },
                 visualTransformation = if (passwordVisible)
                     VisualTransformation.None
-                else
-                    PasswordVisualTransformation(),
+                else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Icon(
@@ -130,13 +134,14 @@ fun LoginScreen(
                 enabled = !isLoading
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(
-                        color = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
                 } else {
                     Text("Login", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
+            }
+
+            TextButton(onClick = { showForgotDialog = true }) {
+                Text("Forgot password?", color = MaterialTheme.colorScheme.primary)
             }
 
             TextButton(onClick = onNavigateToRegister) {
@@ -146,5 +151,84 @@ fun LoginScreen(
                 )
             }
         }
+    }
+
+    // Forgot password dialog
+    if (showForgotDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showForgotDialog = false
+                forgotEmail = ""
+                forgotMessage = ""
+            },
+            title = { Text("Reset Password", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Enter your email address and we'll send you a link to reset your password.",
+                        fontSize = 13.sp,
+                        color = Color.Gray
+                    )
+                    OutlinedTextField(
+                        value = forgotEmail,
+                        onValueChange = {
+                            forgotEmail = it
+                            forgotMessage = ""
+                        },
+                        label = { Text("Email") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (forgotMessage.isNotEmpty()) {
+                        Text(
+                            forgotMessage,
+                            fontSize = 12.sp,
+                            color = if (forgotMessage.startsWith("✅"))
+                                Color(0xFF4CAF50)
+                            else MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (forgotEmail.isBlank()) {
+                            forgotMessage = "Please enter your email"
+                            return@Button
+                        }
+                        forgotLoading = true
+                        FirebaseAuth.getInstance()
+                            .sendPasswordResetEmail(forgotEmail.trim())
+                            .addOnSuccessListener {
+                                forgotMessage = "✅ Reset email sent! Check your inbox."
+                                forgotLoading = false
+                            }
+                            .addOnFailureListener {
+                                forgotMessage = it.message ?: "Failed to send reset email"
+                                forgotLoading = false
+                            }
+                    },
+                    enabled = !forgotLoading
+                ) {
+                    if (forgotLoading) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        Text("Send Reset Email")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showForgotDialog = false
+                    forgotEmail = ""
+                    forgotMessage = ""
+                }) { Text("Cancel") }
+            }
+        )
     }
 }

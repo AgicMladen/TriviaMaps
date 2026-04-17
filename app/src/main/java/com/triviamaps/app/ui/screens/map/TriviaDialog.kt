@@ -21,6 +21,8 @@ import com.triviamaps.app.data.model.TriviaMarker
 import com.triviamaps.app.data.model.User
 import com.triviamaps.app.data.repository.MarkerRepository
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 const val ANSWER_PROXIMITY_METERS = 100f
 
@@ -86,9 +88,8 @@ fun TriviaDialog(
                         contentDescription = "Location image",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp)
                             .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.FillWidth
                     )
                 }
 
@@ -200,9 +201,11 @@ fun TriviaDialog(
                             color = MaterialTheme.colorScheme.errorContainer
                         ) {
                             Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
+                                modifier = Modifier
+                                    .padding(20.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            )  {
                                 Text(
                                     "📍 You are too far away!",
                                     color = MaterialTheme.colorScheme.onErrorContainer,
